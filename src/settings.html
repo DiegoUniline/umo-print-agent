@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>UMO Print Agent</title>
+<style>
+  :root{--bg:#f6f3ee;--card:#fff;--fg:#1f1b16;--muted:#7a7166;--border:#e4ddd2;--primary:#2b241c;--accent:#b08d57;--ok:#15803d;--err:#b91c1c}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.4 "Segoe UI",Inter,system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+  header{background:var(--primary);color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between}
+  header h1{font-size:16px;margin:0}
+  .pill{font-size:12px;padding:3px 10px;border-radius:999px;background:#ffffff22}
+  .pill.ok{background:var(--ok)}.pill.err{background:var(--err)}
+  main{padding:16px 20px;display:grid;gap:14px}
+  section{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
+  select,input[type=number],input[type=text],textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font:inherit;background:#fff}
+  textarea{min-height:52px;resize:vertical}
+  .row{display:flex;gap:10px}.row>*{flex:1}
+  .check{display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--fg);font-size:13px}
+  .actions{display:flex;gap:10px}
+  button{flex:1;padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;font:inherit;font-weight:600;cursor:pointer}
+  button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+  button.accent{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button:disabled{opacity:.5;cursor:default}
+  .icon-btn{flex:0 0 auto;padding:8px 12px}
+  #msg{font-size:13px;min-height:18px}
+  #msg.ok{color:var(--ok)}#msg.err{color:var(--err)}
+  .hidden{display:none}
+  ul{list-style:none;margin:0;padding:0;font-size:12px;max-height:140px;overflow:auto}
+  li{padding:4px 0;border-bottom:1px dashed var(--border);display:flex;justify-content:space-between;gap:8px}
+  li .e{color:var(--err)}li .o{color:var(--ok)}
+  code{font-size:12px}
+</style>
+</head>
+<body>
+<header><h1>UMO Print Agent</h1><span id="status" class="pill">…</span></header>
+<main>
+  <section>
+    <h2>Impresora</h2>
+    <div class="row" style="align-items:flex-end">
+      <div><label for="printer">Impresora</label><select id="printer"></select></div>
+      <button id="refresh" class="icon-btn" title="Actualizar lista">↻</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Papel</h2>
+    <label for="paper">Tamaño</label>
+    <select id="paper"></select>
+    <div id="thermal">
+      <div class="row">
+        <div id="customWrap"><label for="customWidthMm">Ancho del papel (mm)</label><input id="customWidthMm" type="number" min="30" max="120"></div>
+        <div><label for="printableMm">Ancho imprimible (mm)</label><input id="printableMm" type="number" min="20" max="120"></div>
+        <div><label for="offsetMm">Margen izquierdo (mm)</label><input id="offsetMm" type="number" min="-10" max="20" step="0.5"></div>
+      </div>
+    </div>
+    <div class="row">
+      <div><label for="scale">Escala (%)</label><input id="scale" type="number" min="30" max="200"></div>
+      <div><label for="copies">Copias</label><input id="copies" type="number" min="1" max="10"></div>
+    </div>
+    <label class="check"><input id="forceBlack" type="checkbox"> Forzar texto negro (recomendado en térmicas)</label>
+  </section>
+
+  <section>
+    <h2>Sistema</h2>
+    <label class="check"><input id="autoStart" type="checkbox"> Iniciar con Windows</label>
+    <div class="row">
+      <div><label for="port">Puerto local</label><input id="port" type="number" min="1024" max="65535"></div>
+      <div style="flex:2"><label for="allowedOrigins">Orígenes permitidos (vacío = todos)</label><input id="allowedOrigins" type="text" placeholder="https://mi-pos.com, *.lovable.app"></div>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button id="test" class="accent">Imprimir prueba</button>
+    <button id="save" class="primary">Guardar</button>
+  </div>
+  <div id="msg"></div>
+
+  <section>
+    <h2>Últimas impresiones</h2>
+    <ul id="jobs"><li>Sin impresiones</li></ul>
+  </section>
+</main>
+<script src="settings.js"></script>
+</body>
+</html>
