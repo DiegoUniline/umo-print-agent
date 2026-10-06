@@ -33,6 +33,7 @@
   li{padding:4px 0;border-bottom:1px dashed var(--border);display:flex;justify-content:space-between;gap:8px}
   li .e{color:var(--err)}li .o{color:var(--ok)}
   code{font-size:12px}
+  .hint{font-size:12px;color:var(--muted);margin:10px 0 0}
 </style>
 </head>
 <body>
@@ -40,10 +41,28 @@
 <main>
   <section>
     <h2>Impresora</h2>
-    <div class="row" style="align-items:flex-end">
-      <div><label for="printer">Impresora</label><select id="printer"></select></div>
+    <label for="mode">Tipo de conexión</label>
+    <select id="mode"></select>
+    <div id="winWrap" class="row" style="align-items:flex-end">
+      <div><label for="printer">Impresora de Windows</label><select id="printer"></select></div>
       <button id="refresh" class="icon-btn" title="Actualizar lista">↻</button>
     </div>
+    <div id="usbWrap" class="row" style="align-items:flex-end">
+      <div><label for="usbDevice">Impresora USB (ESC/POS)</label><select id="usbDevice"></select></div>
+      <button id="refreshUsb" class="icon-btn" title="Buscar USB">↻</button>
+    </div>
+    <div id="netWrap" class="row">
+      <div style="flex:2"><label for="netHost">IP de la impresora</label><input id="netHost" type="text" placeholder="192.168.1.100"></div>
+      <div><label for="netPort">Puerto</label><input id="netPort" type="number" min="1" max="65535"></div>
+    </div>
+    <div id="escposWrap">
+      <div class="row">
+        <div><label for="threshold">Intensidad (50 claro – 250 oscuro)</label><input id="threshold" type="number" min="50" max="250"></div>
+      </div>
+      <label class="check"><input id="cut" type="checkbox"> Cortar papel al terminar</label>
+      <label class="check"><input id="drawer" type="checkbox"> Abrir cajón de dinero</label>
+    </div>
+    <p id="hint" class="hint"></p>
   </section>
 
   <section>

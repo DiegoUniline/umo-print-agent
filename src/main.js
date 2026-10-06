@@ -3,10 +3,20 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const escpos = require('./escpos');
 
 const DEFAULT_PORT = 17777;
 const PX_PER_MM = 96 / 25.4;
 const MAX_BODY = 15 * 1024 * 1024;
+const DOTS_PER_MM = 8;
+const SLICE_PX = 1000;
+
+const MODES = {
+  driver: 'Driver de Windows',
+  usb: 'ESC/POS USB directo',
+  raw: 'ESC/POS por Windows (RAW)',
+  net: 'ESC/POS por red (IP)',
+};
 
 const PAPERS = {
   '58': { label: 'Térmica 58 mm', widthMm: 58, printableMm: 48 },
@@ -19,7 +29,14 @@ const PAPERS = {
 
 const DEFAULT_CONFIG = {
   port: DEFAULT_PORT,
+  mode: 'driver',
   printer: '',
+  usbDevice: '',
+  netHost: '',
+  netPort: 9100,
+  cut: true,
+  drawer: false,
+  threshold: 170,
   paper: '80',
   customWidthMm: 80,
   printableMm: 72,
@@ -65,7 +82,14 @@ function sanitize(c) {
     return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
   };
   const out = {};
+  if ('mode' in c) out.mode = MODES[c.mode] ? c.mode : 'driver';
   if ('printer' in c) out.printer = String(c.printer || '');
+  if ('usbDevice' in c) out.usbDevice = String(c.usbDevice || '');
+  if ('netHost' in c) out.netHost = String(c.netHost || '').trim();
+  if ('netPort' in c) out.netPort = Math.round(num(c.netPort, 1, 65535, 9100));
+  if ('cut' in c) out.cut = !!c.cut;
+  if ('drawer' in c) out.drawer = !!c.drawer;
+  if ('threshold' in c) out.threshold = Math.round(num(c.threshold, 50, 250, 170));
   if ('paper' in c) out.paper = PAPERS[c.paper] ? c.paper : '80';
   if ('customWidthMm' in c) out.customWidthMm = num(c.customWidthMm, 30, 120, 80);
   if ('printableMm' in c) out.printableMm = num(c.printableMm, 20, 120, 72);
@@ -110,7 +134,8 @@ function buildCss(spec, cfg) {
   if (spec.thermal) {
     css += `@page{size:${spec.widthMm}mm auto;margin:0}
 html{margin:0 !important;padding:0 !important;width:${spec.widthMm}mm !important}
-body{box-sizing:border-box;width:${spec.printableMm}mm !important;max-width:${spec.printableMm}mm !important;margin:0 0 0 ${cfg.offsetMm}mm !important;overflow:hidden;word-wrap:break-word}
+body{box-sizing:border-box;width:${spec.printableMm}mm !important;max-width:${spec.printableMm}mm !important;margin:0 0 0 ${cfg.offsetMm}mm !important;word-wrap:break-word}
+html{overflow-x:hidden !important}::-webkit-scrollbar{display:none}
 img{max-width:100%}`;
   }
   return css;
@@ -125,6 +150,7 @@ function printHtml(html, overrides = {}) {
 
 async function doPrint(html, overrides) {
   const cfg = { ...config, ...sanitize(overrides) };
+  if (cfg.mode !== 'driver') return doPrintEscPos(html, cfg);
   const spec = paperSpec(cfg);
   const started = Date.now();
   const tmp = path.join(os.tmpdir(), `umo-print-${started}-${Math.random().toString(36).slice(2)}.html`);
@@ -182,6 +208,92 @@ async function doPrint(html, overrides) {
   }
 }
 
+function escposTargetLabel(cfg) {
+  if (cfg.mode === 'usb') return `USB ${cfg.usbDevice || '?'}`;
+  if (cfg.mode === 'net') return `${cfg.netHost || '?'}:${cfg.netPort}`;
+  return `RAW ${cfg.printer || '?'}`;
+}
+
+async function doPrintEscPos(html, cfg) {
+  const started = Date.now();
+  const target = escposTargetLabel(cfg);
+  try {
+    const spec = paperSpec(cfg).thermal ? paperSpec(cfg) : paperSpec({ ...cfg, paper: '80' });
+    const raster = await renderRaster(html, cfg, spec);
+    const data = escpos.buildEscPos(raster, { cut: cfg.cut, drawer: cfg.drawer, copies: cfg.copies });
+    if (cfg.mode === 'usb') {
+      if (!cfg.usbDevice) throw new Error('Selecciona la impresora USB');
+      await escpos.sendUsb(cfg.usbDevice, data);
+    } else if (cfg.mode === 'net') {
+      if (!cfg.netHost) throw new Error('Escribe la IP de la impresora');
+      await escpos.sendNet(cfg.netHost, cfg.netPort, data);
+    } else {
+      if (!cfg.printer) throw new Error('Selecciona la impresora de Windows');
+      await escpos.sendRawWindows(cfg.printer, data);
+    }
+    logJob({ ok: true, printer: target, ms: Date.now() - started });
+    return { ok: true, printer: target };
+  } catch (err) {
+    logJob({ ok: false, printer: target, error: err.message });
+    throw err;
+  }
+}
+
+/** Renderiza el HTML a 203 dpi (8 puntos/mm) y lo devuelve como raster monocromo. */
+async function renderRaster(html, cfg, spec) {
+  const dots = Math.floor((spec.printableMm * DOTS_PER_MM) / 8) * 8;
+  const zoom = dots / (spec.printableMm * PX_PER_MM);
+  const offsetDots = Math.max(0, Math.round(cfg.offsetMm * DOTS_PER_MM));
+  const widthDots = dots + offsetDots;
+  const tmp = path.join(os.tmpdir(), `umo-raster-${Date.now()}-${Math.random().toString(36).slice(2)}.html`);
+  const css = buildCss(spec, { ...cfg, offsetMm: 0 }) + `html,body{background:#fff !important}`;
+  fs.writeFileSync(tmp, injectCss(html, css), 'utf8');
+
+  const win = new BrowserWindow({
+    show: false,
+    width: Math.ceil(dots),
+    height: SLICE_PX,
+    useContentSize: true,
+    enableLargerThanScreen: true,
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, zoomFactor: zoom },
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
+
+  try {
+    await win.loadFile(tmp);
+    win.webContents.setZoomFactor(zoom);
+    await new Promise((r) => setTimeout(r, 80));
+    const { total, view, cssWidth } = await win.webContents.executeJavaScript(
+      '({ total: Math.ceil(Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)), view: window.innerHeight, cssWidth: window.innerWidth })',
+      true,
+    );
+    const rows = [];
+    for (let y = 0; y < total; y += view) {
+      const actual = await win.webContents.executeJavaScript(`window.scrollTo(0, ${y}); window.scrollY`, true);
+      await new Promise((r) => setTimeout(r, 60));
+      let img = await win.webContents.capturePage();
+      if (img.getSize().width !== dots) img = img.resize({ width: dots, quality: 'best' });
+      const { width, height } = img.getSize();
+      const k = width / cssWidth;
+      const start = Math.max(0, Math.round((y - actual) * k));
+      const end = Math.min(height, Math.round((Math.min(total, actual + view) - actual) * k));
+      const bmp = img.toBitmap();
+      for (let r = start; r < end; r++) {
+        const row = Buffer.alloc(widthDots * 4, 0xff);
+        bmp.copy(row, offsetDots * 4, r * width * 4, (r + 1) * width * 4);
+        rows.push(row);
+      }
+    }
+    const raster = escpos.rowsToRaster(rows, widthDots, cfg.threshold);
+    if (!raster.height) throw new Error('El ticket salió vacío');
+    return raster;
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+    fs.rm(tmp, { force: true }, () => {});
+  }
+}
+
 function logJob(j) {
   jobs.unshift({ ...j, at: new Date().toLocaleString('es-MX') });
   jobs.length = Math.min(jobs.length, 30);
@@ -196,7 +308,8 @@ function testTicketHtml(cfg) {
   const desc = PAPERS[cfg.paper]?.label || cfg.paper;
   return `<html><head><meta charset="utf-8"><style>body{font-family:monospace;font-size:12px;padding:0}.p{padding:0 2mm}.c{text-align:center}hr{border:none;border-top:1px dashed #000;margin:6px 0}table{width:100%}.r{text-align:right}</style></head><body>${ruler}<div class="p">
 <div class="c"><h2 style="margin:0">UMO</h2><p style="margin:2px 0">PRUEBA DE IMPRESIÓN</p></div><hr>
-<p>Impresora: ${escapeHtml(cfg.printer || '(predeterminada)')}</p>
+<p>Modo: ${escapeHtml(MODES[cfg.mode] || cfg.mode)}</p>
+<p>Impresora: ${escapeHtml(cfg.mode === 'driver' ? cfg.printer || '(predeterminada)' : escposTargetLabel(cfg))}</p>
 <p>Papel: ${escapeHtml(desc)}${spec.thermal ? ` · imprimible ${spec.printableMm} mm` : ''}</p>
 <p>Escala: ${cfg.scale}% · Copias: ${cfg.copies}</p>
 <p>Fecha: ${new Date().toLocaleString('es-MX')}</p><hr>
@@ -263,10 +376,10 @@ async function handle(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, undefined, origin);
 
   if (req.method === 'GET' && url.pathname === '/status') {
-    return send(res, 200, { ok: true, app: 'umo-print-agent', version: app.getVersion(), printer: config.printer || null, paper: config.paper }, origin);
+    return send(res, 200, { ok: true, app: 'umo-print-agent', version: app.getVersion(), mode: config.mode, printer: config.mode === 'driver' ? config.printer || null : escposTargetLabel(config), paper: config.paper }, origin);
   }
   if (req.method === 'GET' && url.pathname === '/printers') {
-    return send(res, 200, { ok: true, printers: await listPrinters() }, origin);
+    return send(res, 200, { ok: true, printers: await listPrinters(), usb: await escpos.listUsbPrinters() }, origin);
   }
   if (req.method === 'POST' && url.pathname === '/print') {
     try {
@@ -351,7 +464,8 @@ function notify(body) {
   if (Notification.isSupported()) new Notification({ title: 'UMO Print Agent', body }).show();
 }
 
-ipcMain.handle('get-config', () => ({ config, papers: PAPERS }));
+ipcMain.handle('get-config', () => ({ config, papers: PAPERS, modes: MODES }));
+ipcMain.handle('get-usb', () => escpos.listUsbPrinters());
 ipcMain.handle('save-config', (_e, c) => saveConfig(c));
 ipcMain.handle('get-printers', () => listPrinters());
 ipcMain.handle('get-status', () => status());

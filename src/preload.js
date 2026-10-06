@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('agent', {
   getConfig: () => ipcRenderer.invoke('get-config'),
   saveConfig: (c) => ipcRenderer.invoke('save-config', c),
   getPrinters: () => ipcRenderer.invoke('get-printers'),
+  getUsb: () => ipcRenderer.invoke('get-usb'),
   getStatus: () => ipcRenderer.invoke('get-status'),
   getJobs: () => ipcRenderer.invoke('get-jobs'),
   testPrint: (c) => ipcRenderer.invoke('test-print', c),

@@ -1,7 +1,7 @@
 {
   "name": "umo-print-agent",
   "productName": "UMO Print Agent",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Agente local de impresión directa para UMO POS",
   "author": "UMO",
   "main": "src/main.js",
@@ -53,6 +53,13 @@
       ],
       "category": "Utility"
     },
-    "publish": null
+    "publish": null,
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "npmRebuild": false
+  },
+  "dependencies": {
+    "usb": "^2.18.0"
   }
 }

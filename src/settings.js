@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const FIELDS = ['printer', 'paper', 'customWidthMm', 'printableMm', 'offsetMm', 'scale', 'copies', 'forceBlack', 'autoStart', 'port', 'allowedOrigins'];
+const FIELDS = ['mode', 'printer', 'usbDevice', 'netHost', 'netPort', 'cut', 'drawer', 'threshold', 'paper', 'customWidthMm', 'printableMm', 'offsetMm', 'scale', 'copies', 'forceBlack', 'autoStart', 'port', 'allowedOrigins'];
 let papers = {};
 
 function readForm() {
@@ -17,7 +17,49 @@ function fillForm(c) {
     if (el.type === 'checkbox') el.checked = !!c[f];
     else el.value = c[f] ?? '';
   }
+  toggleMode();
+}
+
+const HINTS = {
+  driver: 'Usa el driver instalado en Windows (impresoras que aparecen en Configuración > Impresoras).',
+  usb: 'Para impresoras térmicas conectadas por USB sin driver de Windows (como en Poster). Requiere driver WinUSB/libusbK.',
+  raw: 'Envía comandos ESC/POS a una impresora de Windows (p. ej. "Generic / Text Only" en el puerto USB de la térmica).',
+  net: 'Impresoras térmicas con cable de red o WiFi (puerto 9100).',
+};
+
+function toggleMode() {
+  const m = $('mode').value;
+  $('winWrap').classList.toggle('hidden', !['driver', 'raw'].includes(m));
+  $('usbWrap').classList.toggle('hidden', m !== 'usb');
+  $('netWrap').classList.toggle('hidden', m !== 'net');
+  $('escposWrap').classList.toggle('hidden', m === 'driver');
+  $('hint').textContent = HINTS[m] || '';
+  if (m !== 'driver' && !['58', '80', 'custom'].includes($('paper').value)) {
+    $('paper').value = '80';
+    $('printableMm').value = 72;
+  }
+  [...$('paper').options].forEach((o) => { o.disabled = m !== 'driver' && !['58', '80', 'custom'].includes(o.value); });
   toggleThermal();
+}
+
+async function loadUsb(selected) {
+  const sel = $('usbDevice');
+  sel.innerHTML = '<option value="">Buscando…</option>';
+  const list = await window.agent.getUsb();
+  sel.innerHTML = list.length ? '' : '<option value="">No se encontraron impresoras USB</option>';
+  for (const p of list) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.name;
+    sel.appendChild(o);
+  }
+  if (selected && !list.some((p) => p.id === selected)) {
+    const o = document.createElement('option');
+    o.value = selected;
+    o.textContent = `USB ${selected} (no conectada)`;
+    sel.appendChild(o);
+  }
+  if (selected) sel.value = selected;
 }
 
 function toggleThermal() {
@@ -80,6 +122,8 @@ $('paper').addEventListener('change', () => {
 });
 
 $('refresh').addEventListener('click', () => loadPrinters($('printer').value));
+$('refreshUsb').addEventListener('click', () => loadUsb($('usbDevice').value));
+$('mode').addEventListener('change', toggleMode);
 
 $('save').addEventListener('click', async () => {
   fillForm(await window.agent.saveConfig(readForm()));
@@ -95,10 +139,11 @@ $('test').addEventListener('click', async () => {
 });
 
 (async () => {
-  const { config, papers: p } = await window.agent.getConfig();
+  const { config, papers: p, modes } = await window.agent.getConfig();
   papers = p;
+  $('mode').innerHTML = Object.entries(modes).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   $('paper').innerHTML = Object.entries(p).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
-  await loadPrinters(config.printer);
+  await Promise.all([loadPrinters(config.printer), loadUsb(config.usbDevice)]);
   fillForm(config);
   renderStatus(await window.agent.getStatus());
   renderJobs(await window.agent.getJobs());
